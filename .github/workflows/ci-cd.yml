@@ -1,60 +1,65 @@
-name: Cloud-Native DevSecOps CI/CD
+name: DevSecOps Security Scans
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   pull_request:
-    branches:
-      - main
-
-permissions:
-  contents: read
-  security-events: write
-
-env:
-  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-  ACR_NAME: ${{ secrets.ACR_NAME }}
+    branches: [ main ]
 
 jobs:
-  security-scans:
-    name: Trivy + Checkov Scans
+  devsecops-scan:
+    name: Security Scans (Trivy + Checkov)
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Run Trivy filesystem scan
-        uses: aquasecurity/trivy-action@v0.10.1
+      ########################################################
+      # 🔹 Install & Run Trivy
+      ########################################################
+      - name: Install Trivy CLI
+        uses: aquasecurity/setup-trivy@v0.2.0
         with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'HIGH,CRITICAL'
+          version: latest
+          cache: true
 
-      - name: Upload Trivy results as artifact
+      - name: Run Trivy filesystem scan
+        run: |
+          trivy fs . \
+            --format sarif \
+            --output trivy-results.sarif \
+            --severity HIGH,CRITICAL
+
+      - name: Upload Trivy Results
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-results
+          name: trivy-sarif
           path: trivy-results.sarif
 
-      - name: Run Checkov IaC scan
-        uses: bridgecrewio/checkov-action@v2.1.244
+      ########################################################
+      # 🔹 Install & Run Checkov
+      ########################################################
+      - name: Set up Python for Checkov
+        uses: actions/setup-python@v4
         with:
-          directory: terraform-iac/
-          framework: terraform
-          output_format: sarif
-          output_file_path: checkov.sarif
+          python-version: '3.x'
 
-      - name: Upload Checkov results as artifact
+      - name: Install Checkov
+        run: pip install checkov
+
+      - name: Run Checkov IaC scan (Terraform folder)
+        run: |
+          checkov -d terraform-iac \
+            --framework terraform \
+            --output-format sarif \
+            --output-file-path checkov-results.sarif
+
+      - name: Upload Checkov Results
         uses: actions/upload-artifact@v4
         with:
-          name: checkov-results
-          path: checkov.sarif
+          name: checkov-sarif
+          path: checkov-results.sarif
 
   codeql-analysis:
     name: CodeQL Analysis
