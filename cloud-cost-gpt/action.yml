@@ -1,0 +1,24 @@
+name: 'Azure Cost Analyzer'
+description: 'Analyzes Azure costs and provides optimization recommendations using GPT.'
+author: 'Windsurf AI'
+
+inputs:
+  azure-subscription-id:
+    description: 'Azure Subscription ID to analyze costs for.'
+    required: true
+  openai-api-key:
+    description: 'OpenAI API key for GPT analysis.'
+    required: true
+
+outputs:
+  report-path:
+    description: 'Path to the generated cost report markdown file.'
+    value: ${{ steps.run_analyzer.outputs.report_path }}
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+
+branding:
+  icon: 'dollar-sign'
+  color: 'blue'

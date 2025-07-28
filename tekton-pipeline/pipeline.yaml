@@ -1,0 +1,83 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: cloud-native-devsecops-pipeline
+  namespace: tekton-pipelines
+spec:
+  description: |
+    Cloud-native DevSecOps pipeline with security scanning, testing, and deployment
+  params:
+    - name: repo-url
+      type: string
+      description: The git repository URL to clone from.
+    - name: tag-name
+      type: string
+      description: The git tag to clone.
+    - name: image-reference
+      type: string
+      description: Reference of the image to build.
+  workspaces:
+    - name: shared-data
+      description: |
+        This workspace contains the cloned repo files, so they can be read by the
+        next task.
+    - name: git-credentials
+      description: My git credentials
+  tasks:
+    - name: fetch-source
+      taskRef:
+        name: git-clone
+      workspaces:
+        - name: output
+          workspace: shared-data
+        - name: ssh-directory
+          workspace: git-credentials
+      params:
+        - name: url
+          value: $(params.repo-url)
+        - name: tag
+          value: $(params.tag-name)
+    
+    - name: security-scan
+      runAfter: ["fetch-source"]
+      taskRef:
+        name: trivy-scanner
+      workspaces:
+        - name: source
+          workspace: shared-data
+      params:
+        - name: ARGS
+          value:
+            - "fs"
+            - "--security-checks"
+            - "vuln,secret,config"
+            - "--format"
+            - "sarif"
+            - "--output"
+            - "/workspace/source/trivy-results.sarif"
+            - "/workspace/source"
+    
+    - name: build-push
+      runAfter: ["security-scan"]
+      taskRef:
+        name: buildah
+      workspaces:
+        - name: source
+          workspace: shared-data
+      params:
+        - name: IMAGE
+          value: $(params.image-reference)
+        - name: DOCKERFILE
+          value: ./shared-app/Dockerfile
+    
+    - name: deploy-to-dev
+      runAfter: ["build-push"]
+      taskRef:
+        name: argocd-task-sync-and-wait
+      params:
+        - name: application-name
+          value: shared-app-dev
+        - name: argocd-version
+          value: v2.8.0
+        - name: flags
+          value: --insecure

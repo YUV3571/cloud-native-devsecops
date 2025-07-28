@@ -1,0 +1,113 @@
+name: Cloud-Native DevSecOps CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+jobs:
+  security-scans:
+    name: Security Scans
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'HIGH,CRITICAL'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run Checkov IaC scan
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: terraform-iac/
+          framework: terraform
+          output_format: sarif
+          output_file_path: checkov.sarif
+
+      - name: Upload Checkov scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'checkov.sarif'
+
+  terraform:
+    name: Terraform Plan and Apply
+    runs-on: ubuntu-latest
+    needs: security-scans
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ./terraform-iac
+
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan
+        working-directory: ./terraform-iac
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+        working-directory: ./terraform-iac
+
+  trigger-tekton-pipeline:
+    name: Trigger Tekton Pipeline
+    runs-on: ubuntu-latest
+    needs: terraform
+    steps:
+      - name: Trigger Tekton Pipeline
+        uses: tektoncd/triggers/actions/trigger-eventlistener@main
+        with:
+          eventlistener-url: ${{ secrets.TEKTON_EVENTLISTENER_URL }}
+          payload: |
+            {
+              "repo-url": "${{ github.server_url }}/${{ github.repository }}",
+              "tag-name": "${{ github.ref_name }}",
+              "image-reference": "youracr.azurecr.io/shared-app:${{ github.sha }}"
+            }
+
+  run-cost-analysis:
+    name: Run Azure Cost Analysis
+    runs-on: ubuntu-latest
+    needs: terraform
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run Azure Cost Analyzer
+        uses: ./cloud-cost-gpt
+        with:
+          azure-subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Upload Cost Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: cost-report
+          path: cost_report.md

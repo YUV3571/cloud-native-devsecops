@@ -1,0 +1,116 @@
+repositories:
+  - name: prometheus-community
+    url: https://prometheus-community.github.io/helm-charts
+  - name: grafana
+    url: https://grafana.github.io/helm-charts
+  - name: jaegertracing
+    url: https://jaegertracing.github.io/helm-charts
+  - name: elastic
+    url: https://helm.elastic.co
+
+releases:
+  - name: prometheus
+    namespace: monitoring
+    chart: prometheus-community/kube-prometheus-stack
+    version: "51.2.0"
+    values:
+      - prometheus:
+          prometheusSpec:
+            retention: 30d
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: gp3
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 50Gi
+        grafana:
+          enabled: true
+          adminPassword: "admin123"
+          persistence:
+            enabled: true
+            size: 10Gi
+          dashboardProviders:
+            dashboardproviders.yaml:
+              apiVersion: 1
+              providers:
+              - name: 'default'
+                orgId: 1
+                folder: ''
+                type: file
+                disableDeletion: false
+                editable: true
+                options:
+                  path: /var/lib/grafana/dashboards/default
+        alertmanager:
+          enabled: true
+          config:
+            global:
+              smtp_smarthost: 'localhost:587'
+              smtp_from: 'alerts@company.com'
+
+  - name: jaeger
+    namespace: monitoring
+    chart: jaegertracing/jaeger
+    version: "0.71.2"
+    values:
+      - provisionDataStore:
+          cassandra: false
+          elasticsearch: true
+        elasticsearch:
+          deploy: true
+          replicas: 1
+        agent:
+          enabled: true
+        collector:
+          enabled: true
+        query:
+          enabled: true
+          ingress:
+            enabled: true
+            hosts:
+              - jaeger.local
+
+  - name: elasticsearch
+    namespace: monitoring
+    chart: elastic/elasticsearch
+    version: "8.5.1"
+    values:
+      - replicas: 1
+        minimumMasterNodes: 1
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "2Gi"
+
+  - name: kibana
+    namespace: monitoring
+    chart: elastic/kibana
+    version: "8.5.1"
+    values:
+      - resources:
+          requests:
+            cpu: "100m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+
+  - name: fluent-bit
+    namespace: monitoring
+    chart: fluent/fluent-bit
+    version: "0.21.7"
+    values:
+      - config:
+          outputs: |
+            [OUTPUT]
+                Name es
+                Match *
+                Host elasticsearch-master.monitoring.svc.cluster.local
+                Port 9200
+                Index fluent-bit
+                Type _doc

@@ -1,0 +1,58 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-signed-images
+  annotations:
+    policies.kyverno.io/title: Verify Signed Images
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Verify that container images are signed using cosign and meet security requirements.
+spec:
+  validationFailureAction: enforce
+  background: false
+  rules:
+    - name: verify-signature
+      match:
+        any:
+        - resources:
+            kinds:
+            - Pod
+      verifyImages:
+      - imageReferences:
+        - "*"
+        attestors:
+        - entries:
+          - keys:
+              publicKeys: |-
+                -----BEGIN PUBLIC KEY-----
+                MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE8nXRh950IZbRj8Ra/N9sbqOPZrfM
+                5/KAQN0/KjHcorm/J5yctVd7iEcnessRQjU917hmKO6JWVGHpDguIyakZA==
+                -----END PUBLIC KEY-----
+        mutateDigest: true
+        verifyDigest: true
+        required: true
+    
+    - name: disallow-unsigned-images
+      match:
+        any:
+        - resources:
+            kinds:
+            - Pod
+      validate:
+        message: "Only signed images are allowed"
+        pattern:
+          spec:
+            =(securityContext):
+              =(runAsNonRoot): "true"
+              =(runAsUser): ">0"
+            containers:
+            - name: "*"
+              =(securityContext):
+                =(allowPrivilegeEscalation): "false"
+                =(readOnlyRootFilesystem): "true"
+                =(runAsNonRoot): "true"
+                =(capabilities):
+                  =(drop):
+                  - "ALL"

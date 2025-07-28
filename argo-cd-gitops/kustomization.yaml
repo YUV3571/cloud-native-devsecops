@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: argo-cd-gitops
+
+resources:
+  - dev/
+  - stage/
+  - prod/
+
+commonLabels:
+  app.kubernetes.io/managed-by: argocd
+  app.kubernetes.io/part-of: cloud-native-devsecops
+
+patches:
+  - target:
+      kind: Application
+      name: ".*"
+    patch: |-
+      - op: add
+        path: /spec/syncPolicy
+        value:
+          automated:
+            prune: true
+            selfHeal: true
+          syncOptions:
+            - CreateNamespace=true
