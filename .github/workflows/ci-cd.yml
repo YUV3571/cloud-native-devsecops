@@ -37,7 +37,28 @@ jobs:
           output: 'trivy-results.sarif'
           severity: 'HIGH,CRITICAL'
 
+      - name: Check if code scanning is enabled
+        id: check_code_scanning
+        uses: actions/github-script@v6
+        with:
+          script: |
+            try {
+              await github.rest.codeScanning.listAlertsForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 1
+              });
+              return true;
+            } catch (error) {
+              if (error.status === 404) {
+                core.warning('Code scanning is not enabled for this repository. Please enable it in Settings > Security > Code security and analysis.');
+                return false;
+              }
+              throw error;
+            }
+      
       - name: Upload Trivy scan results to GitHub Security tab
+        if: steps.check_code_scanning.outputs.result == 'true'
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-results.sarif'
@@ -51,6 +72,7 @@ jobs:
           output_file_path: checkov.sarif
 
       - name: Upload Checkov scan results to GitHub Security tab
+        if: steps.check_code_scanning.outputs.result == 'true'
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'checkov.sarif'
