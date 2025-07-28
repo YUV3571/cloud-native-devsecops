@@ -8,7 +8,6 @@ on:
     branches:
       - main
 
-# Required for code scanning
 permissions:
   contents: read
   security-events: write
@@ -22,7 +21,7 @@ env:
 
 jobs:
   security-scans:
-    name: Security Scans
+    name: Trivy + Checkov Scans
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -37,31 +36,11 @@ jobs:
           output: 'trivy-results.sarif'
           severity: 'HIGH,CRITICAL'
 
-      - name: Check if code scanning is enabled
-        id: check_code_scanning
-        uses: actions/github-script@v6
+      - name: Upload Trivy results as artifact
+        uses: actions/upload-artifact@v3
         with:
-          script: |
-            try {
-              await github.rest.codeScanning.listAlertsForRepo({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                per_page: 1
-              });
-              return true;
-            } catch (error) {
-              if (error.status === 404) {
-                core.warning('Code scanning is not enabled for this repository. Please enable it in Settings > Security > Code security and analysis.');
-                return false;
-              }
-              throw error;
-            }
-      
-      - name: Upload Trivy scan results to GitHub Security tab
-        if: steps.check_code_scanning.outputs.result == 'true'
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: 'trivy-results.sarif'
+          name: trivy-results
+          path: trivy-results.sarif
 
       - name: Run Checkov IaC scan
         uses: bridgecrewio/checkov-action@master
@@ -71,11 +50,120 @@ jobs:
           output_format: sarif
           output_file_path: checkov.sarif
 
-      - name: Upload Checkov scan results to GitHub Security tab
-        if: steps.check_code_scanning.outputs.result == 'true'
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Upload Checkov results as artifact
+        uses: actions/upload-artifact@v3
         with:
-          sarif_file: 'checkov.sarif'
+          name: checkov-results
+          path: checkov.sarif
+
+  codeql-analysis:
+    name: CodeQL Local Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript # 🔁 change this to your repo's language(s)
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  terraform:
+    name: Terraform Plan and Apply
+    runs-on: ubuntu-latest
+    needs: [security-scans, codeql-analysis]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ./terraform-iac
+
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan
+        working-directory: ./terraform-iac
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+        working-directory: ./terraform-iac
+
+  build-and-push-image:
+    name: Build and Push Container Image
+    runs-on: ubuntu-latest
+    needs: terraform
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up environment variables
+        run: |
+          echo "ACR_LOGIN_SERVER=${{ secrets.ACR_NAME }}.azurecr.io" >> $GITHUB_ENV
+          echo "IMAGE_NAME=${{ secrets.ACR_NAME }}.azurecr.io/shared-app" >> $GITHUB_ENV
+
+      - name: Log in to Azure Container Registry
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ env.ACR_LOGIN_SERVER }}
+          username: ${{ secrets.AZURE_CLIENT_ID }}
+          password: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build and push image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./shared-app
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NODE_ENV=production
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.repository.pushed_at }}
+            org.opencontainers.image.title=shared-app
+            org.opencontainers.image.description=Cloud Native DevSecOps Demo Application
+
+  run-cost-analysis:
+    name: Run Azure Cost Analysis
+    runs-on: ubuntu-latest
+    needs: terraform
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run Azure Cost Analyzer
+        uses: ./cloud-cost-gpt
+        with:
+          azure-subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Upload Cost Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: cost-report
+          path: cost_report.md
 
   terraform:
     name: Terraform Plan and Apply
