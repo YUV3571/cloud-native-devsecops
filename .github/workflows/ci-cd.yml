@@ -68,20 +68,25 @@ jobs:
           curl -LO https://github.com/github/codeql-cli-binaries/releases/latest/download/codeql-linux64.zip
           unzip codeql-linux64.zip
           ./codeql/codeql --version
-  
+      
       - name: Create CodeQL database
         run: |
           ./codeql/codeql database create codeql-db --language=javascript --source-root=.
-  
+      
+      - name: Download JavaScript CodeQL pack
+        run: |
+          ./codeql/codeql pack install javascript
+      
       - name: Run CodeQL analysis
         run: |
           ./codeql/codeql database analyze codeql-db javascript --format=sarifv2.1.0 --output=results.sarif
-  
+      
       - name: Upload CodeQL results as artifact
         uses: actions/upload-artifact@v4
         with:
           name: codeql-results
           path: results.sarif
+
 
 
   terraform:
