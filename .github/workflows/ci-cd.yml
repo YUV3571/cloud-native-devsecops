@@ -13,6 +13,7 @@ env:
   ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
   ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ACR_NAME: ${{ secrets.ACR_NAME }}
 
 jobs:
   security-scans:
@@ -75,21 +76,28 @@ jobs:
         run: terraform apply -auto-approve tfplan
         working-directory: ./terraform-iac
 
-  trigger-tekton-pipeline:
-    name: Trigger Tekton Pipeline
+  build-and-push-image:
+    name: Build and Push Container Image
     runs-on: ubuntu-latest
     needs: terraform
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
-      - name: Trigger Tekton Pipeline
-        uses: tektoncd/triggers/actions/trigger-eventlistener@main
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Log in to Azure Container Registry
+        uses: azure/docker-login@v1
         with:
-          eventlistener-url: ${{ secrets.TEKTON_EVENTLISTENER_URL }}
-          payload: |
-            {
-              "repo-url": "${{ github.server_url }}/${{ github.repository }}",
-              "tag-name": "${{ github.ref_name }}",
-              "image-reference": "youracr.azurecr.io/shared-app:${{ github.sha }}"
-            }
+          login-server: ${{ env.ACR_NAME }}.azurecr.io
+          username: ${{ secrets.AZURE_CLIENT_ID }}
+          password: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./shared-app
+          push: true
+          tags: ${{ env.ACR_NAME }}.azurecr.io/shared-app:${{ github.sha }}
 
   run-cost-analysis:
     name: Run Azure Cost Analysis
