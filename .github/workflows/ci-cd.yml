@@ -73,8 +73,12 @@ jobs:
         run: |
           ./codeql/codeql database create codeql-db --language=javascript --source-root=.
 
-      - name: Clone CodeQL JavaScript queries
-        run: git clone https://github.com/github/codeql-javascript.git
+      - name: Checkout CodeQL JavaScript queries
+        uses: actions/checkout@v3
+        with:
+          repository: github/codeql-javascript
+          path: codeql-javascript
+          fetch-depth: 1
 
       - name: Run CodeQL analysis
         run: |
