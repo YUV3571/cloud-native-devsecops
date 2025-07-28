@@ -56,13 +56,6 @@ jobs:
           name: checkov-results
           path: checkov.sarif
 
-  codeql-analysis:
-    name: CodeQL Local Analysis (manual)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-  
       - name: Download CodeQL CLI
         run: |
           curl -LO https://github.com/github/codeql-cli-binaries/releases/latest/download/codeql-linux64.zip
@@ -75,7 +68,7 @@ jobs:
       
       - name: Download JavaScript CodeQL pack
         run: |
-          ./codeql/codeql pack install javascript
+          ./codeql/codeql pack download javascript
       
       - name: Run CodeQL analysis
         run: |
