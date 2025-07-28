@@ -41,20 +41,20 @@ jobs:
           python-version: '3.x'
 
       - name: Install Checkov
-        run: pip install checkov
-
+        run: pip install -U checkov
+      
       - name: Run Checkov
         run: |
           checkov -d terraform-iac \
             --framework terraform \
-            --output-format sarif \
-            --output-file-path checkov-results.sarif
-
+            --output json \
+            --output-file-path checkov-results.json
+      
       - name: Upload Checkov Results
         uses: actions/upload-artifact@v4
         with:
           name: checkov-results
-          path: checkov-results.sarif
+          path: checkov-results.json
 
   # ------------------------------
   # STEP 2: CodeQL Analysis (depends on security scans)
