@@ -165,32 +165,6 @@ jobs:
           name: cost-report
           path: cost_report.md
 
-  terraform:
-    name: Terraform Plan and Apply
-    runs-on: ubuntu-latest
-    needs: security-scans
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
-        with:
-          terraform_version: 1.5.0
-
-      - name: Terraform Init
-        run: terraform init
-        working-directory: ./terraform-iac
-
-      - name: Terraform Plan
-        run: terraform plan -out=tfplan
-        working-directory: ./terraform-iac
-
-      - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
-        working-directory: ./terraform-iac
-
   build-and-push-image:
     name: Build and Push Container Image
     runs-on: ubuntu-latest
