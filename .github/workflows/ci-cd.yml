@@ -7,24 +7,22 @@ on:
     branches: [ main ]
 
 jobs:
-  devsecops-scan:
-    name: Security Scans (Trivy + Checkov)
+  # ------------------------------
+  # STEP 1: Security Scans (Trivy + Checkov)
+  # ------------------------------
+  security-scans:
+    name: Security Scans
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout Code
         uses: actions/checkout@v3
 
-      ########################################################
-      # 🔹 Install & Run Trivy
-      ########################################################
-      - name: Install Trivy CLI
+      - name: Install Trivy
         uses: aquasecurity/setup-trivy@v0.2.0
         with:
           version: latest
-          cache: true
 
-      - name: Run Trivy filesystem scan
+      - name: Run Trivy
         run: |
           trivy fs . \
             --format sarif \
@@ -34,13 +32,10 @@ jobs:
       - name: Upload Trivy Results
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-sarif
+          name: trivy-results
           path: trivy-results.sarif
 
-      ########################################################
-      # 🔹 Install & Run Checkov
-      ########################################################
-      - name: Set up Python for Checkov
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
@@ -48,7 +43,7 @@ jobs:
       - name: Install Checkov
         run: pip install checkov
 
-      - name: Run Checkov IaC scan (Terraform folder)
+      - name: Run Checkov
         run: |
           checkov -d terraform-iac \
             --framework terraform \
@@ -58,66 +53,64 @@ jobs:
       - name: Upload Checkov Results
         uses: actions/upload-artifact@v4
         with:
-          name: checkov-sarif
+          name: checkov-results
           path: checkov-results.sarif
 
+  # ------------------------------
+  # STEP 2: CodeQL Analysis (depends on security scans)
+  # ------------------------------
   codeql-analysis:
     name: CodeQL Analysis
-    runs-on: ubuntu-latest
     needs: security-scans
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'javascript' ]
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Download CodeQL CLI
-        run: |
-          curl -LO https://github.com/github/codeql-cli-binaries/releases/latest/download/codeql-linux64.zip
-          unzip codeql-linux64.zip
-          ./codeql/codeql --version
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
 
-      - name: Create CodeQL database
-        run: |
-          ./codeql/codeql database create codeql-db --language=javascript --source-root=.
-
-      - name: Download JavaScript CodeQL pack
-        run: |
-          ./codeql/codeql pack download javascript
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
 
       - name: Run CodeQL analysis
-        run: |
-          ./codeql/codeql database analyze codeql-db javascript --format=sarifv2.1.0 --output=results.sarif
+        uses: github/codeql-action/analyze@v3
 
-      - name: Upload CodeQL results as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: codeql-results
-          path: results.sarif
-
+  # ------------------------------
+  # STEP 3: Terraform (depends on CodeQL)
+  # ------------------------------
   terraform:
-    name: Terraform Plan and Apply
-    runs-on: ubuntu-latest
+    name: Terraform Deployment
     needs: codeql-analysis
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.5.0
+          terraform_version: 1.5.7
 
       - name: Terraform Init
         run: terraform init
-        working-directory: ./terraform-iac
 
       - name: Terraform Plan
-        run: terraform plan -out=tfplan
-        working-directory: ./terraform-iac
+        run: terraform plan
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
-        working-directory: ./terraform-iac
+        run: terraform apply -auto-approve
+
 
   build-and-push-image:
     name: Build and Push Container Image
