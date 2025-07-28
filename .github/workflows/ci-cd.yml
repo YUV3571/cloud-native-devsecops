@@ -8,6 +8,11 @@ on:
     branches:
       - main
 
+# Required for code scanning
+permissions:
+  contents: read
+  security-events: write
+
 env:
   ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
   ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
