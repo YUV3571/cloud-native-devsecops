@@ -37,7 +37,7 @@ jobs:
           severity: 'HIGH,CRITICAL'
 
       - name: Upload Trivy results as artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: trivy-results
           path: trivy-results.sarif
@@ -51,7 +51,7 @@ jobs:
           output_file_path: checkov.sarif
 
       - name: Upload Checkov results as artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: checkov-results
           path: checkov.sarif
@@ -164,7 +164,7 @@ jobs:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
 
       - name: Upload Cost Report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: cost-report
           path: cost_report.md
