@@ -70,7 +70,7 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: javascript # 🔁 change this to your repo's language(s)
+          languages: javascript # 🔁 Change this if needed
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
@@ -111,71 +111,6 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Set up environment variables
-        run: |
-          echo "ACR_LOGIN_SERVER=${{ secrets.ACR_NAME }}.azurecr.io" >> $GITHUB_ENV
-          echo "IMAGE_NAME=${{ secrets.ACR_NAME }}.azurecr.io/shared-app" >> $GITHUB_ENV
-
-      - name: Log in to Azure Container Registry
-        uses: azure/docker-login@v1
-        with:
-          login-server: ${{ env.ACR_LOGIN_SERVER }}
-          username: ${{ secrets.AZURE_CLIENT_ID }}
-          password: ${{ secrets.AZURE_CLIENT_SECRET }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Build and push image
-        uses: docker/build-push-action@v4
-        with:
-          context: ./shared-app
-          push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
-            ${{ env.IMAGE_NAME }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            NODE_ENV=production
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.created=${{ github.event.repository.pushed_at }}
-            org.opencontainers.image.title=shared-app
-            org.opencontainers.image.description=Cloud Native DevSecOps Demo Application
-
-  run-cost-analysis:
-    name: Run Azure Cost Analysis
-    runs-on: ubuntu-latest
-    needs: terraform
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Run Azure Cost Analyzer
-        uses: ./cloud-cost-gpt
-        with:
-          azure-subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-
-      - name: Upload Cost Report
-        uses: actions/upload-artifact@v3
-        with:
-          name: cost-report
-          path: cost_report.md
-
-  build-and-push-image:
-    name: Build and Push Container Image
-    runs-on: ubuntu-latest
-    needs: terraform
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-        
-      - name: Set up environment variables
-        id: set-env
         run: |
           echo "ACR_LOGIN_SERVER=${{ secrets.ACR_NAME }}.azurecr.io" >> $GITHUB_ENV
           echo "IMAGE_NAME=${{ secrets.ACR_NAME }}.azurecr.io/shared-app" >> $GITHUB_ENV
