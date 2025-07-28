@@ -33,7 +33,7 @@ jobs:
           severity: 'HIGH,CRITICAL'
 
       - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-results.sarif'
 
@@ -46,7 +46,7 @@ jobs:
           output_file_path: checkov.sarif
 
       - name: Upload Checkov scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'checkov.sarif'
 
@@ -81,6 +81,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: terraform
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    env:
+      ACR_LOGIN_SERVER: ${{ env.ACR_NAME }}.azurecr.io
+      IMAGE_NAME: ${{ env.ACR_NAME }}.azurecr.io/shared-app
+      
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -88,16 +92,35 @@ jobs:
       - name: Log in to Azure Container Registry
         uses: azure/docker-login@v1
         with:
-          login-server: ${{ env.ACR_NAME }}.azurecr.io
+          login-server: ${{ env.ACR_LOGIN_SERVER }}
           username: ${{ secrets.AZURE_CLIENT_ID }}
           password: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+        with:
+          install: true
+          driver-opts: |
+            image=moby/buildkit:master
 
       - name: Build and push image
         uses: docker/build-push-action@v4
         with:
           context: ./shared-app
           push: true
-          tags: ${{ env.ACR_NAME }}.azurecr.io/shared-app:${{ github.sha }}
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NODE_ENV=production
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.repository.pushed_at }}
+            org.opencontainers.image.title=shared-app
+            org.opencontainers.image.description=Cloud Native DevSecOps Demo Application
 
   run-cost-analysis:
     name: Run Azure Cost Analysis
