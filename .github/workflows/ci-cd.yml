@@ -75,7 +75,7 @@ jobs:
   
       - name: Run CodeQL analysis
         run: |
-          ./codeql/codeql database analyze codeql-db ./codeql/packs/codeql/javascript/javascript-code-scanning.qls --format=sarifv2.1.0 --output=results.sarif
+          ./codeql/codeql database analyze codeql-db javascript --format=sarifv2.1.0 --output=results.sarif
   
       - name: Upload CodeQL results as artifact
         uses: actions/upload-artifact@v4
