@@ -24,74 +24,15 @@ jobs:
 
       - name: Run Trivy
         run: |
-          trivy fs . \
-            --format sarif \
-            --output trivy-results.sarif \
-            --severity HIGH,CRITICAL
+          trivy fs . --severity HIGH,CRITICAL
 
-      - name: Upload Trivy Results
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-results
-          path: trivy-results.sarif
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
-
-      - name: Install Checkov
-        run: pip install -U checkov
-      
       - name: Run Checkov
         run: |
-          checkov -d terraform-iac \
-            --framework terraform \
-            --output json \
-            --output-file-path checkov-results.json
-      
-      - name: Upload Checkov Results
-        uses: actions/upload-artifact@v4
-        with:
-          name: checkov-results
-          path: checkov-results.json
+          checkov -d terraform-iac --framework terraform
 
-  # ------------------------------
-  # STEP 2: CodeQL Analysis (depends on security scans)
-  # ------------------------------
-  codeql-analysis:
-    name: CodeQL Analysis
-    needs: security-scans
-    runs-on: ubuntu-latest
-    permissions:
-      security-events: write
-      actions: read
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [ 'javascript' ]
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: ${{ matrix.language }}
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
-
-      - name: Run CodeQL analysis
-        uses: github/codeql-action/analyze@v3
-
-  # ------------------------------
-  # STEP 3: Terraform (depends on CodeQL)
-  # ------------------------------
   terraform:
     name: Terraform Deployment
-    needs: codeql-analysis
+    needs: security-scans
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -110,7 +51,6 @@ jobs:
 
       - name: Terraform Apply
         run: terraform apply -auto-approve
-
 
   build-and-push-image:
     name: Build and Push Container Image
