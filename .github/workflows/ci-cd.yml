@@ -143,6 +143,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      - name: Debug subscription ID
+        run: |
+          echo "Length: ${#AZURE_SUBSCRIPTION_ID}"
+          echo "First 8 chars: ${AZURE_SUBSCRIPTION_ID:0:8}"
+          echo "Last 4 chars: ${AZURE_SUBSCRIPTION_ID: -4}"
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
       - name: Run Azure Cost Analyzer
         uses: ./cloud-cost-gpt
         with:
