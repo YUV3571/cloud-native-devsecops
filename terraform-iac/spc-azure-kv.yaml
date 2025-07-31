@@ -1,0 +1,18 @@
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: azure-kv
+  namespace: default
+spec:
+  provider: azure
+  parameters:
+    usePodIdentity: "false"
+    keyvaultName: proj1kv-new
+    objects: |
+      array:
+        - |
+          objectName: projsec
+          objectType: secret
+    tenantId: 064b45c9-099a-434d-b1a9-3a8022cec9e1
+    # Enable rotation
+    rotationPollInterval: "2m"
