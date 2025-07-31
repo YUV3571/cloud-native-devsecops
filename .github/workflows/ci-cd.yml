@@ -31,8 +31,14 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Install Checkov
-        run: pip install -U checkov
+      - name: Check for Terraform changes
+        id: tf_diff
+        run: |
+          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep '^terraform-iac/'; then
+            echo "tf_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "tf_changed=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Run Checkov
         run: |
@@ -41,6 +47,7 @@ jobs:
   terraform:
     name: Terraform Deployment
     needs: security-scans
+    if: needs.security-scans.outputs.tf_changed == 'true'
     runs-on: ubuntu-latest
     env:
       ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
