@@ -31,6 +31,14 @@ jobs:
         with:
           python-version: '3.x'
 
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install Checkov
+        run: pip install -U checkov
+
       - name: Check for Terraform changes
         id: tf_diff
         run: |
