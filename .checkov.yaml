@@ -1,0 +1,6 @@
+skip_checks:
+  - CKV_AZURE_227  # Not required for free trial
+  - CKV_AZURE_6    # Not required for free trial
+  - CKV_AZURE_116  # Not required for free trial
+  - CKV_AZURE_171  # Not required for free trial
+  - CKV2_AZURE_29  # Not required for free trial
