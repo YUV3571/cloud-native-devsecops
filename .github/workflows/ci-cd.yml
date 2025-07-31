@@ -53,12 +53,15 @@ jobs:
 
       - name: Terraform Init
         run: terraform init
+        working-directory: terraform-iac
 
       - name: Terraform Plan
         run: terraform plan
+        working-directory: terraform-iac
 
       - name: Terraform Apply
         run: terraform apply -auto-approve
+        working-directory: terraform-iac
 
   build-and-push-image:
     name: Build and Push Container Image
