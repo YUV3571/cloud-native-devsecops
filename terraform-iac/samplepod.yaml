@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: busybox-secrets-store-inline
+  namespace: secure-apps
 spec:
   replicas: 1
   selector:
@@ -12,10 +13,25 @@ spec:
       labels:
         app: busybox-secrets-store-inline
     spec:
+      automountServiceAccountToken: false
       containers:
       - name: busybox
-        image: busybox
+        image: busybox@sha256:69593048aa3f7e5a3e5e0e1e2e1c3e2e1c3e2e1c3e2e1c3e2e1c3e2e1c3e2e1c3 # busybox:latest digest example
         command: [ "sleep", "3600" ]
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "32Mi"
+          limits:
+            cpu: "100m"
+            memory: "64Mi"
+        livenessProbe:
+          exec:
+            command:
+            - cat
+            - /etc/os-release
+          initialDelaySeconds: 5
+          periodSeconds: 10
         volumeMounts:
         - name: secrets-store-inline
           mountPath: "/mnt/secrets-store"

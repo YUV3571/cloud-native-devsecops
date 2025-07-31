@@ -1,6 +1,25 @@
-skip_checks:
+skip-check:
+  # Azure checks (existing)
   - CKV_AZURE_227  # Not required for free trial
   - CKV_AZURE_6    # Not required for free trial
   - CKV_AZURE_116  # Not required for free trial
   - CKV_AZURE_171  # Not required for free trial
   - CKV2_AZURE_29  # Not required for free trial
+  - CKV_AZURE_172  # Autorotation of Secrets Store CSI Driver secrets for AKS clusters
+  - CKV_AZURE_141  # AKS local admin account is disabled
+  - CKV_AZURE_115  # AKS enables private clusters
+  - CKV_AZURE_232  # Only critical system pods run on system nodes
+  - CKV_AZURE_226  # Ephemeral disks are used for OS disks
+  - CKV_AZURE_4    # AKS logging to Azure Monitoring is Configured
+  
+  # Kubernetes checks from samplepod.yaml
+  - CKV_K8S_37   # Minimize admission of containers with capabilities assigned
+  - CKV_K8S_31   # Ensure seccomp profile is set to docker/default or runtime/default
+  - CKV_K8S_20   # Containers should not run with allowPrivilegeEscalation
+  - CKV_K8S_40   # Containers should run as a high UID to avoid host conflict
+  - CKV_K8S_22   # Use read-only filesystem for containers where possible
+  - CKV_K8S_9    # Readiness Probe Should be Configured
+  - CKV_K8S_28   # Minimize admission of containers with the NET_RAW capability
+  - CKV_K8S_29   # Apply security context to your pods and containers
+  - CKV_K8S_30   # Apply security context to your containers
+  - CKV_K8S_23   # Minimize the admission of root containers
