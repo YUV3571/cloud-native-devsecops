@@ -1,6 +1,6 @@
 name: 'Azure Cost Analyzer'
 description: 'Analyzes Azure costs and provides optimization recommendations using GPT.'
-author: 'Windsurf AI'
+author: 'YC'
 
 inputs:
   azure-subscription-id:
