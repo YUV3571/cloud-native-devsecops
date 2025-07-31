@@ -79,6 +79,10 @@ jobs:
 
       - name: Set up environment variables
         run: |
+          if [ -z "${{ secrets.ACR_NAME }}" ]; then
+            echo "::error::ACR_NAME secret is not set. Please add it in repo settings."
+            exit 1
+          fi
           echo "ACR_LOGIN_SERVER=${{ secrets.ACR_NAME }}.azurecr.io" >> $GITHUB_ENV
           echo "IMAGE_NAME=${{ secrets.ACR_NAME }}.azurecr.io/shared-app" >> $GITHUB_ENV
 
