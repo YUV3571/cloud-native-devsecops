@@ -70,3 +70,9 @@ This repository defaults to the no-cost local demo path.
 - application images are built locally
 - images are loaded into the `kind` cluster directly
 - AWS/ECR release automation stays disabled unless repository variable `ENABLE_AWS_RELEASE=true` is set
+
+Release local changes with one command:
+
+```bash
+./scripts/local-release.sh
+```
