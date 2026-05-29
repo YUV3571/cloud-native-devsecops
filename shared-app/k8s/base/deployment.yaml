@@ -16,8 +16,8 @@ spec:
     spec:
       containers:
         - name: shared-app
-          image: ghcr.io/yuv3571/cloud-native-devsecops/shared-app:latest
-          imagePullPolicy: Always
+          image: shared-app:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
               name: http
