@@ -1,91 +1,111 @@
-# Cloud-Native DevSecOps Platform
+# Cloud-Native DevSecOps Portfolio Platform
 
-A comprehensive cloud-native DevSecOps platform featuring GitOps, CI/CD pipelines, security policies, autoscaling, observability, and cost optimization.
+This repository is being rebuilt into a deployable DevOps portfolio project with concrete proof, not just architecture claims. The target end state is an AWS/EKS platform with GitOps, policy enforcement, observability, and focused AI features that solve real operations problems.
 
-## 🏗️ Architecture Overview
+## Current Direction
 
-This repository contains a complete cloud-native DevSecOps stack with:
+The project is being narrowed to a credible MVP:
 
-- **GitOps**: Argo CD for declarative deployments
-- **CI/CD**: Tekton pipelines for cloud-native builds
-- **Security**: Kyverno policies for admission control
-- **Autoscaling**: KEDA with OpenAI sentiment analysis
-- **Observability**: Comprehensive monitoring stack
-- **Infrastructure**: Terraform for EKS provisioning
-- **Cost Optimization**: AI-powered cost analysis
+- **GitOps**: Argo CD deploys the sample application from this repo
+- **Application**: a small Node.js service with health and Prometheus endpoints
+- **Security**: Kyverno policies for signed images and hardened pods
+- **Secrets**: AWS Secrets Manager synced into EKS with External Secrets Operator
+- **Autoscaling**: KEDA-based scaling plus an AI autoscaling advisor concept
+- **Observability**: Prometheus, Grafana, and tracing/logging integration
+- **AI Cost Optimization**: GitHub Action that generates AWS cost recommendations
+- **Infrastructure**: Terraform-managed AWS VPC, EKS, and ECR
 
-## 📁 Project Structure
+## Current Status
 
-```
+This repo is mid-modernization. Some directories were older experiments and did not match the README. The first cleanup pass focuses on making the repository internally consistent:
+
+- Added real Kubernetes manifests for the sample app
+- Added Argo CD `Application` resources for `dev`, `stage`, and `prod`
+- Rewrote this README around a proof-driven MVP
+- Removed committed secrets, local state, and Azure-only leftovers from the tracked repo
+- Replaced the Terraform baseline with AWS/EKS scaffolding
+- Reworked the AI cost analyzer around AWS Cost Explorer
+
+## Repository Layout
+
+```text
 cloud-native-devsecops/
-├── argo-cd-gitops/          # GitOps configurations
-├── tekton-pipeline/         # CI/CD pipeline definitions
-├── kyverno-policies/        # Security and compliance policies
-├── keda-openai-scaler/      # AI-powered autoscaling
-├── observability-stack/     # Monitoring and logging
-├── terraform-iac/          # Infrastructure as Code
-├── cloud-cost-gpt/         # Cost optimization tools
-├── shared-app/             # Sample application
-└── .github/workflows/      # GitHub Actions
+├── .github/workflows/       # CI, security scans, and AI cost analysis workflow
+├── argo-cd-gitops/          # Argo CD applications for each environment
+├── cloud-cost-gpt/          # AI cost analysis GitHub Action
+├── docs/                    # Modernization notes and portfolio roadmap
+├── keda-openai-scaler/      # KEDA manifests and AI autoscaling experiments
+├── kyverno-policies/        # Admission and image verification policies
+├── observability-stack/     # Helmfile-based monitoring stack
+├── platform-secrets/        # External Secrets manifests for runtime secrets
+├── shared-app/              # Demo application and Kubernetes manifests
+└── terraform-iac/           # AWS infrastructure for VPC, EKS, and ECR
 ```
 
-## 🚀 Quick Start
+## What Makes This Portfolio-Worthy
 
-1. **Prerequisites**
-   - Kubernetes cluster (EKS recommended)
-   - kubectl configured
-   - Helm 3.x
-   - Terraform
-   - GitHub Actions secrets configured
+The goal is to show working evidence:
 
-2. **Deploy Infrastructure**
-   ```bash
-   cd terraform-iac
-   terraform init
-   terraform plan
-   terraform apply
-   ```
+- successful GitHub Actions runs
+- Argo CD sync status
+- deployed application URL
+- Kyverno policy enforcement output
+- KEDA scaling evidence
+- Grafana dashboards and traces
+- AI-generated cost optimization reports
 
-3. **Install GitOps**
-   ```bash
-   kubectl apply -k argo-cd-gitops/
-   ```
+If a feature cannot be demonstrated, it should not be presented as complete.
 
-4. **Deploy Pipelines**
-   ```bash
-   kubectl apply -f tekton-pipeline/
-   ```
+## Deployable App Baseline
 
-## 🔐 Required Secrets
+The sample app now includes Kubernetes manifests under [`shared-app/k8s`](/Users/yuv/PycharmProjects/uni/GITHUB/cloud-native-devsecops/shared-app/k8s) with:
 
-Configure these secrets in GitHub Actions:
+- base deployment and service
+- environment overlays for `dev`, `stage`, and `prod`
+- Argo CD applications in [`argo-cd-gitops`](/Users/yuv/PycharmProjects/uni/GITHUB/cloud-native-devsecops/argo-cd-gitops)
 
-| Secret Name | Purpose |
-|-------------|---------|
-| `TF_API_TOKEN` | Terraform Cloud authentication |
-| `OPENAI_API_KEY` | GPT-based features (cost, logs) |
-| `SOPS_AGE_KEY` | SOPS private key (base64 encoded) |
-| `AZURE_CLIENT_ID` | Azure SDK authentication |
-| `AZURE_CLIENT_SECRET` | Azure SDK authentication |
+Apply the Argo CD applications once Argo CD is installed:
 
-## 📊 Features
+```bash
+kubectl apply -f argo-cd-gitops/
+```
 
-- ✅ **GitOps Workflow**: Automated deployments with Argo CD
-- ✅ **Cloud-Native CI/CD**: Tekton pipelines
-- ✅ **Security Policies**: Kyverno admission controllers
-- ✅ **AI-Powered Scaling**: KEDA with sentiment analysis
-- ✅ **Full Observability**: Prometheus, Grafana, Jaeger
-- ✅ **Cost Optimization**: AI-driven cost analysis
-- ✅ **Infrastructure as Code**: Terraform EKS modules
+The AWS infrastructure baseline lives in [`terraform-iac`](/Users/yuv/PycharmProjects/uni/GITHUB/cloud-native-devsecops/terraform-iac) and now targets:
 
-## 🛠️ Contributing
+- VPC and subnet layout for EKS
+- managed EKS node group
+- ECR repository for the app image
+- External Secrets Operator with IRSA for AWS Secrets Manager access
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests and security scans
-5. Submit a pull request
+## Secret Management
 
-## 📝 License
+Runtime secrets are now intended to flow through AWS Secrets Manager into Kubernetes:
 
-MIT License - see [LICENSE](LICENSE) file for details.
+- AWS Secrets Manager stores the source secret values
+- External Secrets Operator runs in EKS with IRSA
+- Argo CD applies `ExternalSecret` manifests from [`platform-secrets`](/Users/yuv/PycharmProjects/uni/GITHUB/cloud-native-devsecops/platform-secrets)
+- Kubernetes workloads consume ordinary `Secret` objects created by the operator
+
+The current production wiring creates a `prometheus-secret` in namespace `prod` from the AWS secret `cloud-native-devsecops/prod/monitoring/prometheus`.
+
+## AI Features
+
+The project is being repositioned around two credible AI features:
+
+1. **AI Cost Optimization**
+   Uses AWS Cost Explorer data and an LLM to generate actionable cost reduction recommendations.
+
+2. **AI Autoscaling Advisor**
+   Advises on better scaling thresholds from observed metrics and traffic patterns.
+   The advisor should recommend settings, not directly own production scaling decisions.
+
+## Next Major Fixes
+
+- deploy the AWS/EKS platform and collect proof artifacts
+- add proof artifacts and screenshots after deployment
+- tighten the GitHub Actions workflow
+- instrument the app and dashboards for scaling demonstrations
+
+## Roadmap
+
+The modernization plan is tracked in [`docs/portfolio-roadmap.md`](/Users/yuv/PycharmProjects/uni/GITHUB/cloud-native-devsecops/docs/portfolio-roadmap.md).
