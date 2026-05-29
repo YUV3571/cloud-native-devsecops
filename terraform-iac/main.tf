@@ -21,6 +21,12 @@ locals {
   )
 }
 
+data "archive_file" "secret_rotation_zip" {
+  type        = "zip"
+  source_file = "${path.module}/rotation/rotate_secret.py"
+  output_path = "${path.module}/rotation/rotate_secret.zip"
+}
+
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "5.19.0"
@@ -84,7 +90,7 @@ module "eks" {
 
 resource "aws_ecr_repository" "shared_app" {
   name                 = "${var.project_name}/shared-app"
-  image_tag_mutability = "MUTABLE"
+  image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {
     scan_on_push = true
@@ -93,11 +99,110 @@ resource "aws_ecr_repository" "shared_app" {
   tags = local.tags
 }
 
+resource "aws_kms_key" "secrets" {
+  description             = "KMS key for Secrets Manager secrets"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  tags = local.tags
+}
+
+resource "aws_kms_alias" "secrets" {
+  name          = "alias/${var.project_name}-secrets"
+  target_key_id = aws_kms_key.secrets.key_id
+}
+
 resource "aws_secretsmanager_secret" "prometheus_token" {
   name        = local.prometheus_secret_name
   description = "Prometheus bearer token consumed by KEDA via External Secrets"
+  kms_key_id  = aws_kms_key.secrets.arn
 
   tags = local.tags
+}
+
+resource "aws_iam_role" "secret_rotation_lambda" {
+  name = "${var.project_name}-secret-rotation-lambda"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy_attachment" "secret_rotation_lambda_basic" {
+  role       = aws_iam_role.secret_rotation_lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+data "aws_iam_policy_document" "secret_rotation_lambda_access" {
+  statement {
+    actions = [
+      "secretsmanager:PutSecretValue",
+      "secretsmanager:DescribeSecret",
+    ]
+    resources = [aws_secretsmanager_secret.prometheus_token.arn]
+  }
+}
+
+resource "aws_iam_policy" "secret_rotation_lambda_access" {
+  name   = "${var.project_name}-secret-rotation-lambda-access"
+  policy = data.aws_iam_policy_document.secret_rotation_lambda_access.json
+
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy_attachment" "secret_rotation_lambda_access" {
+  role       = aws_iam_role.secret_rotation_lambda.name
+  policy_arn = aws_iam_policy.secret_rotation_lambda_access.arn
+}
+
+resource "aws_lambda_function" "secret_rotation" {
+  function_name    = "${var.project_name}-secret-rotation"
+  role             = aws_iam_role.secret_rotation_lambda.arn
+  handler          = "rotate_secret.lambda_handler"
+  runtime          = "python3.12"
+  filename         = data.archive_file.secret_rotation_zip.output_path
+  source_code_hash = data.archive_file.secret_rotation_zip.output_base64sha256
+  timeout          = 30
+
+  environment {
+    variables = {
+      SECRET_ID = aws_secretsmanager_secret.prometheus_token.name
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.secret_rotation_lambda_basic,
+    aws_iam_role_policy_attachment.secret_rotation_lambda_access,
+  ]
+
+  tags = local.tags
+}
+
+resource "aws_secretsmanager_secret_rotation" "prometheus_token" {
+  secret_id           = aws_secretsmanager_secret.prometheus_token.id
+  rotation_lambda_arn = aws_lambda_function.secret_rotation.arn
+
+  rotation_rules {
+    automatically_after_days = 30
+  }
+}
+
+resource "aws_lambda_permission" "allow_secrets_manager" {
+  statement_id  = "AllowExecutionFromSecretsManager"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.secret_rotation.function_name
+  principal     = "secretsmanager.amazonaws.com"
 }
 
 data "aws_eks_cluster" "this" {
