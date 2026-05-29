@@ -1,0 +1,16 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shared-app
+spec:
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        environment: prod
+    spec:
+      containers:
+        - name: shared-app
+          env:
+            - name: APP_ENV
+              value: prod
