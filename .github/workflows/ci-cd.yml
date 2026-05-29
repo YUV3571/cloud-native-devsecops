@@ -1,4 +1,4 @@
-name: DevSecOps Security Scans
+name: Portfolio CI
 
 on:
   push:
@@ -6,16 +6,16 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: write
+
 jobs:
-  # ------------------------------
-  # STEP 1: Security Scans (Trivy + Checkov)
-  # ------------------------------
   security-scans:
     name: Security Scans
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install Trivy
         uses: aquasecurity/setup-trivy@v0.2.0
@@ -27,141 +27,198 @@ jobs:
           trivy fs . --severity HIGH,CRITICAL
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
+          python-version: '3.12'
 
       - name: Install Checkov
         run: pip install -U checkov
 
-      - name: Check for Terraform changes
-        id: tf_diff
-        run: |
-          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep '^terraform-iac/'; then
-            echo "tf_changed=true" >> $GITHUB_OUTPUT
-          else
-            echo "tf_changed=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Run Checkov
-        run: |
-          checkov -d terraform-iac --framework terraform
+        run: checkov -d terraform-iac --framework terraform
 
-  terraform:
-    name: Terraform Deployment
+  terraform-validate:
+    name: Terraform Validate
     needs: security-scans
-    if: needs.security-scans.outputs.tf_changed == 'true'
     runs-on: ubuntu-latest
-    env:
-      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.5.7
 
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+        working-directory: terraform-iac
+
       - name: Terraform Init
-        run: terraform init
+        run: terraform init -backend=false
         working-directory: terraform-iac
 
-      - name: Terraform Plan
-        run: terraform plan
+      - name: Terraform Validate
+        run: terraform validate
         working-directory: terraform-iac
 
-      - name: Terraform Apply
-        run: terraform apply -auto-approve
-        working-directory: terraform-iac
-
-  build-and-push-image:
-    name: Build and Push Container Image
+  shared-app-verify:
+    name: Shared App Verify
     runs-on: ubuntu-latest
-    # needs: terraform
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: security-scans
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Set up environment variables
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: shared-app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: shared-app
+
+      - name: Syntax check
+        run: node --check app.js
+        working-directory: shared-app
+
+      - name: Build container image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./shared-app
+          push: false
+          tags: shared-app:ci
+
+  shared-app-release:
+    name: Shared App Release
+    runs-on: ubuntu-latest
+    needs:
+      - security-scans
+      - shared-app-verify
+      - terraform-validate
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip release]')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check required secrets
+        id: release_secrets
         run: |
-          if [ -z "${{ secrets.ACR_NAME }}" ]; then
-            echo "::error::ACR_NAME secret is not set. Please add it in repo settings."
-            exit 1
+          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ] && [ -n "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ] && [ -n "${{ secrets.AWS_REGION }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "ACR_LOGIN_SERVER=${{ secrets.ACR_NAME }}.azurecr.io" >> $GITHUB_ENV
-          echo "IMAGE_NAME=${{ secrets.ACR_NAME }}.azurecr.io/shared-app" >> $GITHUB_ENV
 
-      - name: Log in to Azure Container Registry
-        uses: azure/docker-login@v1
+      - name: Explain skip
+        if: steps.release_secrets.outputs.configured != 'true'
+        run: echo "Skipping shared-app release because AWS deployment secrets are not configured."
+
+      - name: Configure AWS credentials
+        if: steps.release_secrets.outputs.configured == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          login-server: ${{ env.ACR_LOGIN_SERVER }}
-          username: ${{ secrets.AZURE_CLIENT_ID }}
-          password: ${{ secrets.AZURE_CLIENT_SECRET }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-        with:
-          install: true
-          driver-opts: |
-            image=moby/buildkit:master
+      - name: Login to Amazon ECR
+        if: steps.release_secrets.outputs.configured == 'true'
+        uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push image
-        uses: docker/build-push-action@v4
+      - name: Resolve ECR repository
+        if: steps.release_secrets.outputs.configured == 'true'
+        id: ecr
+        run: |
+          repo_uri="$(aws ecr describe-repositories \
+            --repository-names cloud-native-devsecops/shared-app \
+            --query 'repositories[0].repositoryUri' \
+            --output text)"
+          echo "repo_uri=$repo_uri" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push shared-app image
+        if: steps.release_secrets.outputs.configured == 'true'
+        uses: docker/build-push-action@v6
         with:
           context: ./shared-app
           push: true
           tags: |
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
-            ${{ env.IMAGE_NAME }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            NODE_ENV=production
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.created=${{ github.event.repository.pushed_at }}
-            org.opencontainers.image.title=shared-app
-            org.opencontainers.image.description=Cloud Native DevSecOps Demo Application
+            ${{ steps.ecr.outputs.repo_uri }}:${{ github.sha }}
+            ${{ steps.ecr.outputs.repo_uri }}:latest
+
+      - name: Set up kustomize
+        if: steps.release_secrets.outputs.configured == 'true'
+        uses: imranismail/setup-kustomize@v2
+
+      - name: Update deployment manifests
+        if: steps.release_secrets.outputs.configured == 'true'
+        run: |
+          image_ref="${{ steps.ecr.outputs.repo_uri }}:${{ github.sha }}"
+          for overlay in shared-app/k8s/overlays/dev shared-app/k8s/overlays/stage shared-app/k8s/overlays/prod; do
+            (
+              cd "$overlay"
+              kustomize edit set image shared-app="$image_ref"
+            )
+          done
+
+      - name: Commit manifest update
+        if: steps.release_secrets.outputs.configured == 'true'
+        run: |
+          if git diff --quiet -- shared-app/k8s/overlays; then
+            echo "No manifest changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add shared-app/k8s/overlays
+          git commit -m "Deploy shared-app image ${{ github.sha }} [skip release]"
+          git push origin HEAD:main
 
   run-cost-analysis:
-    name: Run Azure Cost Analysis
+    name: Run AWS Cost Analysis
     runs-on: ubuntu-latest
-    # needs: terraform
+    needs: security-scans
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Debug subscription ID
+      - name: Check required secrets
+        id: cost_secrets
         run: |
-          echo "Length: ${#AZURE_SUBSCRIPTION_ID}"
-          echo "First 8 chars: ${AZURE_SUBSCRIPTION_ID:0:8}"
-          echo "Last 4 chars: ${AZURE_SUBSCRIPTION_ID: -4}"
-        env:
-          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ] && [ -n "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ] && [ -n "${{ secrets.AWS_REGION }}" ] && [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Run Azure Cost Analyzer
+      - name: Configure AWS credentials
+        if: steps.cost_secrets.outputs.configured == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Run AWS Cost Analyzer
+        if: steps.cost_secrets.outputs.configured == 'true'
         uses: ./cloud-cost-gpt
         with:
-          azure-subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          aws-region: ${{ secrets.AWS_REGION }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-        env:
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+      - name: Explain skip
+        if: steps.cost_secrets.outputs.configured != 'true'
+        run: echo "Skipping AWS cost analysis because required secrets are not configured."
 
       - name: Upload Cost Report
+        if: steps.cost_secrets.outputs.configured == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: cost-report
