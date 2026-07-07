@@ -2,6 +2,8 @@ provider "aws" {
   region = var.aws_region
 }
 
+data "aws_caller_identity" "current" {}
+
 data "aws_availability_zones" "available" {
   state = "available"
 }
@@ -92,11 +94,29 @@ resource "aws_ecr_repository" "shared_app" {
   name                 = "${var.project_name}/shared-app"
   image_tag_mutability = "IMMUTABLE"
 
+  encryption_configuration {
+    encryption_type = "KMS"
+    kms_key         = aws_kms_key.ecr.arn
+  }
+
   image_scanning_configuration {
     scan_on_push = true
   }
 
   tags = local.tags
+}
+
+resource "aws_kms_key" "ecr" {
+  description             = "KMS key for ECR image encryption"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  tags = local.tags
+}
+
+resource "aws_kms_alias" "ecr" {
+  name          = "alias/${var.project_name}-ecr"
+  target_key_id = aws_kms_key.ecr.key_id
 }
 
 resource "aws_kms_key" "secrets" {
@@ -166,14 +186,72 @@ resource "aws_iam_role_policy_attachment" "secret_rotation_lambda_access" {
   policy_arn = aws_iam_policy.secret_rotation_lambda_access.arn
 }
 
+resource "aws_sqs_queue" "secret_rotation_dlq" {
+  name                      = "${var.project_name}-secret-rotation-dlq"
+  kms_master_key_id         = "alias/aws/sqs"
+  message_retention_seconds = 1209600
+
+  tags = local.tags
+}
+
+data "aws_iam_policy_document" "secret_rotation_lambda_dlq" {
+  statement {
+    actions   = ["sqs:SendMessage"]
+    resources = [aws_sqs_queue.secret_rotation_dlq.arn]
+  }
+}
+
+resource "aws_iam_policy" "secret_rotation_lambda_dlq" {
+  name   = "${var.project_name}-secret-rotation-lambda-dlq"
+  policy = data.aws_iam_policy_document.secret_rotation_lambda_dlq.json
+
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy_attachment" "secret_rotation_lambda_dlq" {
+  role       = aws_iam_role.secret_rotation_lambda.name
+  policy_arn = aws_iam_policy.secret_rotation_lambda_dlq.arn
+}
+
+resource "aws_security_group" "secret_rotation_lambda" {
+  name        = "${var.project_name}-secret-rotation-lambda"
+  description = "Security group for the secret rotation Lambda"
+  vpc_id      = module.vpc.vpc_id
+
+  egress {
+    description = "Allow outbound HTTPS for AWS APIs"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = local.tags
+}
+
 resource "aws_lambda_function" "secret_rotation" {
-  function_name    = "${var.project_name}-secret-rotation"
-  role             = aws_iam_role.secret_rotation_lambda.arn
-  handler          = "rotate_secret.lambda_handler"
-  runtime          = "python3.12"
-  filename         = data.archive_file.secret_rotation_zip.output_path
-  source_code_hash = data.archive_file.secret_rotation_zip.output_base64sha256
-  timeout          = 30
+  function_name                  = "${var.project_name}-secret-rotation"
+  role                           = aws_iam_role.secret_rotation_lambda.arn
+  handler                        = "rotate_secret.lambda_handler"
+  runtime                        = "python3.12"
+  filename                       = data.archive_file.secret_rotation_zip.output_path
+  source_code_hash               = data.archive_file.secret_rotation_zip.output_base64sha256
+  timeout                        = 30
+  kms_key_arn                    = aws_kms_key.secrets.arn
+  reserved_concurrent_executions = 2
+
+  dead_letter_config {
+    target_arn = aws_sqs_queue.secret_rotation_dlq.arn
+  }
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  vpc_config {
+    subnet_ids         = module.vpc.private_subnets
+    security_group_ids = [aws_security_group.secret_rotation_lambda.id]
+  }
 
   environment {
     variables = {
@@ -184,6 +262,7 @@ resource "aws_lambda_function" "secret_rotation" {
   depends_on = [
     aws_iam_role_policy_attachment.secret_rotation_lambda_basic,
     aws_iam_role_policy_attachment.secret_rotation_lambda_access,
+    aws_iam_role_policy_attachment.secret_rotation_lambda_dlq,
   ]
 
   tags = local.tags
@@ -199,10 +278,12 @@ resource "aws_secretsmanager_secret_rotation" "prometheus_token" {
 }
 
 resource "aws_lambda_permission" "allow_secrets_manager" {
-  statement_id  = "AllowExecutionFromSecretsManager"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.secret_rotation.function_name
-  principal     = "secretsmanager.amazonaws.com"
+  statement_id   = "AllowExecutionFromSecretsManager"
+  action         = "lambda:InvokeFunction"
+  function_name  = aws_lambda_function.secret_rotation.function_name
+  principal      = "secretsmanager.amazonaws.com"
+  source_account = data.aws_caller_identity.current.account_id
+  source_arn     = aws_secretsmanager_secret.prometheus_token.arn
 }
 
 data "aws_eks_cluster" "this" {
