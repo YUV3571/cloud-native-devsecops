@@ -1,19 +1,22 @@
-name: 'Azure Cost Analyzer'
-description: 'Analyzes Azure costs and provides optimization recommendations using GPT.'
+name: 'AWS Cost Analyzer'
+description: 'Analyzes AWS spend and optional Infracost estimates to generate cost optimization recommendations.'
 author: 'YC'
 
 inputs:
-  azure-subscription-id:
-    description: 'Azure Subscription ID to analyze costs for.'
+  aws-region:
+    description: 'AWS region used for Cost Explorer authentication context.'
     required: true
   openai-api-key:
-    description: 'OpenAI API key for GPT analysis.'
-    required: true
+    description: 'Optional OpenAI API key for narrative summarisation.'
+    required: false
+  infracost-json:
+    description: 'Optional path to an Infracost JSON file generated earlier in the workflow.'
+    required: false
 
 outputs:
   report-path:
     description: 'Path to the generated cost report markdown file.'
-    value: ${{ steps.run_analyzer.outputs.report_path }}
+    value: cost_report.md
 
 runs:
   using: 'docker'

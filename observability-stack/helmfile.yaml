@@ -7,6 +7,8 @@ repositories:
     url: https://jaegertracing.github.io/helm-charts
   - name: elastic
     url: https://helm.elastic.co
+  - name: fluent
+    url: https://fluent.github.io/helm-charts
 
 releases:
   - name: prometheus
@@ -27,7 +29,10 @@ releases:
                       storage: 50Gi
         grafana:
           enabled: true
-          adminPassword: "admin123"
+          admin:
+            existingSecret: grafana-admin
+            userKey: admin-user
+            passwordKey: admin-password
           persistence:
             enabled: true
             size: 10Gi

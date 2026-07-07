@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   security-scans:
@@ -92,9 +92,46 @@ jobs:
           push: false
           tags: shared-app:ci
 
+  infracost-diff:
+    name: Infracost Diff
+    runs-on: ubuntu-latest
+    needs: terraform-validate
+    permissions:
+      contents: read
+      pull-requests: write
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Explain skip
+        if: vars.ENABLE_INFRACOST != 'true'
+        run: echo "Skipping Infracost because ENABLE_INFRACOST is not enabled for this repository."
+
+      - name: Setup Infracost
+        if: vars.ENABLE_INFRACOST == 'true'
+        uses: infracost/actions/setup@v3
+
+      - name: Generate Infracost JSON
+        if: vars.ENABLE_INFRACOST == 'true'
+        run: |
+          infracost breakdown \
+            --path terraform-iac \
+            --format json \
+            --out-file infracost.json
+
+      - name: Upload Infracost JSON
+        if: vars.ENABLE_INFRACOST == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: infracost-json
+          path: infracost.json
+
   shared-app-release:
     name: Shared App Release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     needs:
       - security-scans
       - shared-app-verify
@@ -192,7 +229,7 @@ jobs:
       - name: Check required secrets
         id: cost_secrets
         run: |
-          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ] && [ -n "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ] && [ -n "${{ secrets.AWS_REGION }}" ] && [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
+          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ] && [ -n "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ] && [ -n "${{ secrets.AWS_REGION }}" ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
@@ -212,6 +249,7 @@ jobs:
         with:
           aws-region: ${{ secrets.AWS_REGION }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          infracost-json: infracost.json
 
       - name: Explain skip
         if: steps.cost_secrets.outputs.configured != 'true'
@@ -221,5 +259,5 @@ jobs:
         if: steps.cost_secrets.outputs.configured == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: cost-report
+          name: aws-cost-report
           path: cost_report.md

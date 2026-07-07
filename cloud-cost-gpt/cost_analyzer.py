@@ -1,113 +1,190 @@
 #!/usr/bin/env python3
-"""
-Azure Cost Optimizer with GPT
+"""Generate an AWS cost optimisation report with optional Infracost context."""
 
-This script fetches Azure cost data, identifies high-cost and underutilized
-resources, and uses OpenAI GPT to generate cost-saving recommendations.
-"""
+from __future__ import annotations
 
+import json
 import os
-import logging
-from datetime import datetime, timedelta
-import openai
-from azure.identity import DefaultAzureCredential
-from azure.mgmt.costmanagement import CostManagementClient
-from azure.mgmt.monitor import MonitorManagementClient
+from collections import defaultdict
+from datetime import date, timedelta
+from pathlib import Path
+from typing import Any
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
+from openai import OpenAI
 
-class AzureCostAnalyzer:
-    def __init__(self):
-        # Authenticate using default credentials (e.g., environment variables)
-        self.credential = DefaultAzureCredential()
-        self.subscription_id = os.getenv('AZURE_SUBSCRIPTION_ID')
-        if not self.subscription_id:
-            raise ValueError("AZURE_SUBSCRIPTION_ID environment variable not set.")
 
-        self.cost_mgmt_client = CostManagementClient(self.credential)
-        self.monitor_client = MonitorManagementClient(self.credential, self.subscription_id)
-        self.openai_client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+def fetch_aws_costs() -> list[dict[str, Any]]:
+    end = date.today()
+    start = end - timedelta(days=30)
+    client = boto3.client("ce", region_name=os.environ["AWS_REGION"])
+    response = client.get_cost_and_usage(
+        TimePeriod={"Start": start.isoformat(), "End": end.isoformat()},
+        Granularity="MONTHLY",
+        Metrics=["UnblendedCost"],
+        GroupBy=[{"Type": "DIMENSION", "Key": "SERVICE"}],
+    )
+    groups = response["ResultsByTime"][0].get("Groups", [])
+    rows: list[dict[str, Any]] = []
+    for group in groups:
+        amount = float(group["Metrics"]["UnblendedCost"]["Amount"])
+        rows.append(
+            {
+                "service": group["Keys"][0],
+                "amount": amount,
+                "unit": group["Metrics"]["UnblendedCost"]["Unit"],
+            }
+        )
+    return sorted(rows, key=lambda item: item["amount"], reverse=True)
 
-    def get_cost_data(self, scope: str) -> dict:
-        """Fetches cost data for the last 30 days."""
-        logger.info(f"Fetching cost data for scope: {scope}")
-        try:
-            end_date = datetime.utcnow()
-            start_date = end_date - timedelta(days=30)
 
-            query_result = self.cost_mgmt_client.query.usage(
-                scope=scope,
-                parameters={
-                    "type": "ActualCost",
-                    "timeframe": "Custom",
-                    "time_period": {
-                        "from": start_date.isoformat(),
-                        "to": end_date.isoformat()
-                    },
-                    "dataset": {
-                        "granularity": "None",
-                        "aggregation": {
-                            "totalCost": {
-                                "name": "Cost",
-                                "function": "Sum"
-                            }
-                        },
-                        "grouping": [
-                            {"type": "Dimension", "name": "ResourceType"},
-                            {"type": "Dimension", "name": "ResourceGroupName"}
-                        ]
-                    }
+def load_infracost_summary(path: str | None) -> dict[str, Any] | None:
+    if not path:
+        return None
+    file_path = Path(path)
+    if not file_path.exists():
+        return {"error": f"Infracost file not found: {path}"}
+
+    payload = json.loads(file_path.read_text())
+    projects = payload.get("projects", [])
+    total_monthly_cost = 0.0
+    resource_deltas: list[dict[str, Any]] = []
+
+    for project in projects:
+        breakdown = project.get("breakdown", {})
+        total_monthly_cost += float(breakdown.get("totalMonthlyCost", 0.0))
+        for resource in breakdown.get("resources", []):
+            diff = resource.get("monthlyCost", "0")
+            previous = resource.get("previousMonthlyCost")
+            resource_deltas.append(
+                {
+                    "name": resource.get("name", "unknown"),
+                    "monthly_cost": float(diff or 0.0),
+                    "previous_monthly_cost": float(previous or 0.0),
+                    "diff": float(resource.get("diff", 0.0) or 0.0),
                 }
             )
-            return query_result.rows
-        except Exception as e:
-            logger.error(f"Error fetching cost data: {e}")
-            return []
 
-    def analyze_costs_with_gpt(self, cost_data: list) -> str:
-        """Uses OpenAI GPT to analyze cost data and generate recommendations."""
-        logger.info("Analyzing cost data with OpenAI GPT...")
-        if not cost_data:
-            return "No cost data available to analyze."
+    resource_deltas.sort(key=lambda item: abs(item["diff"]), reverse=True)
+    return {
+        "project_count": len(projects),
+        "total_monthly_cost": total_monthly_cost,
+        "largest_deltas": resource_deltas[:5],
+    }
 
-        prompt_data = "\n".join([f"ResourceType: {row[1]}, RG: {row[2]}, Cost: {row[0]:.2f} USD" for row in cost_data])
-        system_prompt = (
-            "You are an expert Azure cost optimization assistant. Analyze the following Azure cost data, "
-            "which shows cost per resource type and resource group for the last 30 days. "
-            "Provide a summary of the highest cost services and concrete, actionable recommendations to reduce costs. "
-            "Focus on common areas like right-sizing VMs, deleting idle resources, using reservations, or switching to more cost-effective services. "
-            "Format the output as a markdown report."
+
+def heuristic_recommendations(cost_rows: list[dict[str, Any]], infracost: dict[str, Any] | None) -> list[str]:
+    recommendations: list[str] = []
+    top_rows = cost_rows[:3]
+    for row in top_rows:
+        service = row["service"]
+        if "EC2" in service or "Elastic Compute" in service:
+            recommendations.append("Review EC2 rightsizing, instance scheduling, and Savings Plans coverage for the highest compute spend.")
+        elif "EKS" in service or "Kubernetes" in service:
+            recommendations.append("Inspect EKS node group utilisation, HPA/KEDA thresholds, and idle workloads in non-production namespaces.")
+        elif "CloudWatch" in service:
+            recommendations.append("Reduce high-cardinality metrics, shorten log retention where allowed, and remove unused dashboards or alarms.")
+        elif "NAT Gateway" in service:
+            recommendations.append("Check cross-AZ egress, consolidate private egress paths, and evaluate interface endpoints for heavy AWS API traffic.")
+
+    if infracost and infracost.get("largest_deltas"):
+        recommendations.append("Review the highest Infracost deltas before merge and challenge any change that raises baseline monthly spend without an SLO or capacity justification.")
+
+    if not recommendations:
+        recommendations.append("No dominant cost driver was detected; review tagged spend by environment and remove unused development resources.")
+    return recommendations
+
+
+def render_prompt(cost_rows: list[dict[str, Any]], infracost: dict[str, Any] | None) -> str:
+    lines = ["AWS 30-day spend by service:"]
+    lines.extend([f"- {row['service']}: {row['amount']:.2f} {row['unit']}" for row in cost_rows[:10]])
+    if infracost:
+        lines.append("")
+        lines.append("Infracost pull request context:")
+        if "error" in infracost:
+            lines.append(f"- {infracost['error']}")
+        else:
+            lines.append(f"- Projects analysed: {infracost['project_count']}")
+            lines.append(f"- Estimated baseline monthly cost: {infracost['total_monthly_cost']:.2f} USD")
+            for delta in infracost["largest_deltas"]:
+                lines.append(
+                    f"- {delta['name']}: current {delta['monthly_cost']:.2f} USD, previous {delta['previous_monthly_cost']:.2f} USD, diff {delta['diff']:.2f} USD"
+                )
+    return "\n".join(lines)
+
+
+def summarise_with_openai(prompt: str) -> str | None:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+    client = OpenAI(api_key=api_key)
+    response = client.responses.create(
+        model="gpt-4.1-mini",
+        input=[
+            {
+                "role": "system",
+                "content": "You are a FinOps engineer. Produce a concise markdown report with summary, risks, and actionable recommendations.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+    )
+    return response.output_text
+
+
+def render_markdown(cost_rows: list[dict[str, Any]], infracost: dict[str, Any] | None) -> str:
+    prompt = render_prompt(cost_rows, infracost)
+    ai_summary = summarise_with_openai(prompt)
+    recommendations = heuristic_recommendations(cost_rows, infracost)
+
+    by_bucket: dict[str, float] = defaultdict(float)
+    for row in cost_rows:
+        by_bucket[row["service"]] += row["amount"]
+
+    lines = [
+        "# AWS Cost Optimisation Report",
+        "",
+        "## Spend Summary",
+        "",
+    ]
+    for service, amount in list(sorted(by_bucket.items(), key=lambda item: item[1], reverse=True))[:10]:
+        lines.append(f"- {service}: {amount:.2f} USD")
+
+    lines.extend(["", "## Recommendations", ""])
+    lines.extend([f"- {item}" for item in recommendations])
+
+    if infracost:
+        lines.extend(["", "## Infracost Context", ""])
+        if "error" in infracost:
+            lines.append(f"- {infracost['error']}")
+        else:
+            lines.append(f"- Projects analysed: {infracost['project_count']}")
+            lines.append(f"- Estimated baseline monthly cost: {infracost['total_monthly_cost']:.2f} USD")
+            for delta in infracost["largest_deltas"]:
+                lines.append(f"- {delta['name']}: diff {delta['diff']:.2f} USD/month")
+
+    if ai_summary:
+        lines.extend(["", "## AI Summary", "", ai_summary.strip()])
+
+    return "\n".join(lines) + "\n"
+
+
+def main() -> int:
+    try:
+        cost_rows = fetch_aws_costs()
+    except (BotoCoreError, ClientError, KeyError) as exc:
+        Path("cost_report.md").write_text(
+            "# AWS Cost Optimisation Report\n\n- Failed to query AWS Cost Explorer.\n- Error: "
+            + str(exc)
+            + "\n"
         )
+        return 1
 
-        try:
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4-turbo",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt_data}
-                ]
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            logger.error(f"Error with OpenAI request: {e}")
-            return "Failed to generate cost analysis report."
+    infracost = load_infracost_summary(os.getenv("INFRACOST_JSON_PATH"))
+    report = render_markdown(cost_rows, infracost)
+    Path("cost_report.md").write_text(report)
+    return 0
 
-    def run(self):
-        """Main execution logic."""
-        scope = f"/subscriptions/{self.subscription_id}"
-        cost_data = self.get_cost_data(scope)
-        report = self.analyze_costs_with_gpt(cost_data)
-
-        logger.info("\n--- Azure Cost Optimization Report ---\n")
-        print(report)
-
-        # Save report to a file for GitHub Actions artifact
-        with open("cost_report.md", "w") as f:
-            f.write(report)
-        logger.info("\nReport saved to cost_report.md")
 
 if __name__ == "__main__":
-    analyzer = AzureCostAnalyzer()
-    analyzer.run()
+    raise SystemExit(main())

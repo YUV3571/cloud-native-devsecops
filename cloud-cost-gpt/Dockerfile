@@ -15,7 +15,7 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Install dependencies
-RUN pip install --no-cache-dir azure-identity azure-mgmt-costmanagement azure-mgmt-monitor openai
+RUN pip install --no-cache-dir boto3 openai
 
 # Entrypoint
 ENTRYPOINT ["/entrypoint.sh"]
