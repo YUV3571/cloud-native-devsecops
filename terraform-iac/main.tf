@@ -106,9 +106,9 @@ resource "aws_ecr_repository" "shared_app" {
   tags = local.tags
 }
 
-# checkov:skip=CKV_AWS_356: AWS KMS key policies require "*" as the resource to refer to the key itself.
-# checkov:skip=CKV_AWS_109: Root access in the default KMS key policy is intentionally constrained to this account root principal.
-# checkov:skip=CKV_AWS_111: Root access in the default KMS key policy is intentionally constrained to this account root principal.
+#checkov:skip=CKV_AWS_356: AWS KMS key policies require "*" as the resource to refer to the key itself.
+#checkov:skip=CKV_AWS_109: Root access in the default KMS key policy is intentionally constrained to this account root principal.
+#checkov:skip=CKV_AWS_111: Root access in the default KMS key policy is intentionally constrained to this account root principal.
 data "aws_iam_policy_document" "kms_key_default" {
   statement {
     sid    = "EnableRootPermissions"
