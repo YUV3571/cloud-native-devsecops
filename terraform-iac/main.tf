@@ -199,6 +199,11 @@ resource "aws_iam_role_policy_attachment" "secret_rotation_lambda_basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
+resource "aws_iam_role_policy_attachment" "secret_rotation_lambda_vpc" {
+  role       = aws_iam_role.secret_rotation_lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
 data "aws_iam_policy_document" "secret_rotation_lambda_access" {
   statement {
     actions = [
@@ -265,15 +270,14 @@ resource "aws_security_group" "secret_rotation_lambda" {
 }
 
 resource "aws_lambda_function" "secret_rotation" {
-  function_name                  = "${var.project_name}-secret-rotation"
-  role                           = aws_iam_role.secret_rotation_lambda.arn
-  handler                        = "rotate_secret.lambda_handler"
-  runtime                        = "python3.12"
-  filename                       = data.archive_file.secret_rotation_zip.output_path
-  source_code_hash               = data.archive_file.secret_rotation_zip.output_base64sha256
-  timeout                        = 30
-  kms_key_arn                    = aws_kms_key.secrets.arn
-  reserved_concurrent_executions = 2
+  function_name    = "${var.project_name}-secret-rotation"
+  role             = aws_iam_role.secret_rotation_lambda.arn
+  handler          = "rotate_secret.lambda_handler"
+  runtime          = "python3.12"
+  filename         = data.archive_file.secret_rotation_zip.output_path
+  source_code_hash = data.archive_file.secret_rotation_zip.output_base64sha256
+  timeout          = 30
+  kms_key_arn      = aws_kms_key.secrets.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.secret_rotation_dlq.arn
@@ -296,6 +300,7 @@ resource "aws_lambda_function" "secret_rotation" {
 
   depends_on = [
     aws_iam_role_policy_attachment.secret_rotation_lambda_basic,
+    aws_iam_role_policy_attachment.secret_rotation_lambda_vpc,
     aws_iam_role_policy_attachment.secret_rotation_lambda_access,
     aws_iam_role_policy_attachment.secret_rotation_lambda_dlq,
   ]
@@ -402,6 +407,7 @@ resource "aws_iam_role_policy_attachment" "external_secrets_access" {
 }
 
 resource "helm_release" "external_secrets" {
+  count            = var.enable_external_secrets_helm ? 1 : 0
   name             = "external-secrets"
   repository       = "https://charts.external-secrets.io"
   chart            = "external-secrets"
@@ -427,6 +433,16 @@ resource "helm_release" "external_secrets" {
   set {
     name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
     value = aws_iam_role.external_secrets.arn
+  }
+
+  set {
+    name  = "webhook.create"
+    value = "false"
+  }
+
+  set {
+    name  = "certController.create"
+    value = "false"
   }
 
   depends_on = [
