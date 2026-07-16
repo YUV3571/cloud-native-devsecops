@@ -270,14 +270,14 @@ resource "aws_security_group" "secret_rotation_lambda" {
 }
 
 resource "aws_lambda_function" "secret_rotation" {
-  function_name    = "${var.project_name}-secret-rotation"
-  role             = aws_iam_role.secret_rotation_lambda.arn
-  handler          = "rotate_secret.lambda_handler"
-  runtime          = "python3.12"
-  filename         = data.archive_file.secret_rotation_zip.output_path
-  source_code_hash = data.archive_file.secret_rotation_zip.output_base64sha256
-  timeout          = 30
-  kms_key_arn      = aws_kms_key.secrets.arn
+  function_name                  = "${var.project_name}-secret-rotation"
+  role                           = aws_iam_role.secret_rotation_lambda.arn
+  handler                        = "rotate_secret.lambda_handler"
+  runtime                        = "python3.12"
+  filename                       = data.archive_file.secret_rotation_zip.output_path
+  source_code_hash               = data.archive_file.secret_rotation_zip.output_base64sha256
+  timeout                        = 30
+  kms_key_arn                    = aws_kms_key.secrets.arn
   reserved_concurrent_executions = 2
 
   dead_letter_config {
