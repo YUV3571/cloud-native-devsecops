@@ -278,6 +278,7 @@ resource "aws_lambda_function" "secret_rotation" {
   source_code_hash = data.archive_file.secret_rotation_zip.output_base64sha256
   timeout          = 30
   kms_key_arn      = aws_kms_key.secrets.arn
+  reserved_concurrent_executions = 2
 
   dead_letter_config {
     target_arn = aws_sqs_queue.secret_rotation_dlq.arn
