@@ -35,7 +35,7 @@ jobs:
         run: pip install -U checkov
 
       - name: Run Checkov
-        run: checkov -d terraform-iac --framework terraform
+        run: checkov -d terraform-iac --framework terraform --download-external-modules true
 
   terraform-validate:
     name: Terraform Validate
