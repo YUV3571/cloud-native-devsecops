@@ -106,10 +106,26 @@ resource "aws_ecr_repository" "shared_app" {
   tags = local.tags
 }
 
+data "aws_iam_policy_document" "kms_key_default" {
+  statement {
+    sid    = "EnableRootPermissions"
+    effect = "Allow"
+
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+
+    actions   = ["kms:*"]
+    resources = ["*"]
+  }
+}
+
 resource "aws_kms_key" "ecr" {
   description             = "KMS key for ECR image encryption"
   deletion_window_in_days = 7
   enable_key_rotation     = true
+  policy                  = data.aws_iam_policy_document.kms_key_default.json
 
   tags = local.tags
 }
@@ -123,6 +139,7 @@ resource "aws_kms_key" "secrets" {
   description             = "KMS key for Secrets Manager secrets"
   deletion_window_in_days = 7
   enable_key_rotation     = true
+  policy                  = data.aws_iam_policy_document.kms_key_default.json
 
   tags = local.tags
 }
@@ -188,7 +205,7 @@ resource "aws_iam_role_policy_attachment" "secret_rotation_lambda_access" {
 
 resource "aws_sqs_queue" "secret_rotation_dlq" {
   name                      = "${var.project_name}-secret-rotation-dlq"
-  kms_master_key_id         = "alias/aws/sqs"
+  kms_master_key_id         = aws_kms_key.secrets.arn
   message_retention_seconds = 1209600
 
   tags = local.tags
