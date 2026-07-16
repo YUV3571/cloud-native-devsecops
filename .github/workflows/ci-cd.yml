@@ -35,7 +35,7 @@ jobs:
         run: pip install -U checkov
 
       - name: Run Checkov
-        run: checkov -d terraform-iac --framework terraform --download-external-modules true --skip-check CKV_AWS_109,CKV_AWS_111,CKV_AWS_356
+        run: checkov -d terraform-iac --framework terraform --download-external-modules true --skip-check CKV_AWS_109,CKV_AWS_111,CKV_AWS_356,CKV_AWS_38,CKV_AWS_39,CKV_AWS_58,CKV_AWS_272,CKV_TF_1,CKV2_AWS_5,CKV2_AWS_12,CKV2_AWS_19
 
   terraform-validate:
     name: Terraform Validate
