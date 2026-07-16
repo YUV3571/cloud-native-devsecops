@@ -40,8 +40,11 @@ module "vpc" {
   private_subnets = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
   public_subnets  = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
 
-  enable_nat_gateway = true
-  single_nat_gateway = true
+  enable_nat_gateway             = true
+  single_nat_gateway             = true
+  manage_default_security_group  = true
+  default_security_group_ingress = []
+  default_security_group_egress  = []
 
   public_subnet_tags = {
     "kubernetes.io/role/elb" = "1"
@@ -54,17 +57,29 @@ module "vpc" {
   tags = local.tags
 }
 
+#checkov:skip=CKV2_AWS_19: NAT gateway EIPs are intentionally allocated for managed egress, not direct EC2 attachment.
+#checkov:skip=CKV_AWS_39: Demo cluster keeps public endpoint enabled for GitHub Actions and local kubectl bootstrap.
+#checkov:skip=CKV_AWS_38: Public endpoint exposure is intentional for bootstrap access in this portfolio environment.
+#checkov:skip=CKV2_AWS_5: EKS module security groups are attached indirectly by managed control-plane and node-group resources.
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "20.24.2"
 
-  cluster_name    = local.cluster_name
-  cluster_version = var.kubernetes_version
-  enable_irsa     = true
+  cluster_name               = local.cluster_name
+  cluster_version            = var.kubernetes_version
+  enable_irsa                = true
+  create_cni_ipv6_iam_policy = false
 
   cluster_endpoint_public_access           = true
   enable_cluster_creator_admin_permissions = true
   cluster_enabled_log_types                = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+  cloudwatch_log_group_retention_in_days   = 365
+  cloudwatch_log_group_kms_key_id          = aws_kms_key.secrets.arn
+
+  cluster_encryption_config = {
+    resources        = ["secrets"]
+    provider_key_arn = aws_kms_key.secrets.arn
+  }
 
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
