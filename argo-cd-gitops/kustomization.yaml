@@ -5,7 +5,6 @@ resources:
   - dev.yaml
   - stage.yaml
   - prod.yaml
-  - platform-secrets-prod.yaml
 
 commonLabels:
   app.kubernetes.io/managed-by: argocd

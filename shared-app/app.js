@@ -51,6 +51,11 @@ app.get('/healthz', (req, res) => {
   res.status(200).send({ status: 'ok' });
 });
 
+app.get('/readyz', (req, res) => {
+  recordRequest('/readyz', req.method, 200);
+  res.status(200).send({ status: 'ready' });
+});
+
 app.get('/metrics', async (req, res) => {
   res.set('Content-Type', register.contentType);
   const metrics = await register.metrics();
